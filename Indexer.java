@@ -50,7 +50,7 @@ public class Indexer{
                 }else{
                     ArrayList<String> files = new ArrayList<>();
                     for(int i = 1; i < args.length; i++){
-                        if(args[i].charAt(0) != '-'){
+                        if(args[i].charAt(0) != '-' && !args[i-1].equals("--maxFiles")){
                             files.add(args[i]);
                         }
                     }
