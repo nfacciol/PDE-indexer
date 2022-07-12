@@ -22,14 +22,6 @@ int remoteConnection;
 char* diskName;
 char* databaseName;
 const std::string WHITESPACE = " \n\r\t\f\v";
-struct User{
-    std::string userID;
-    std::string userName;
-    std::string topLevelDirectory;
-    std::vector<std::string> userFiles;
-    std::vector<std::string> userDirs;
-};
-
 std::string _id;
 std::string userName;
 std::vector<std::string> userHashes;
@@ -160,12 +152,12 @@ static int get_info(const char *fpath, const struct stat *sb,
         std::string root;
         if(!f){
             if(type=="f"){
-                root = "INSERT OR REPLACE INTO FILES (ID,NAME) VALUES(\'" + rootHash + "\',\'" + idx +"\');";
+                root = "INSERT OR IGNORE INTO FILES (ID,NAME) VALUES(\'" + rootHash + "\',\'" + idx +"\');";
                 char *sqlInsert = const_cast<char*>(root.c_str());
                 remoteConnection = sqlite3_exec(db, sqlInsert, callback, 0, &zErrMsg);
                 op = "inserted into FILES values : " + rootHash + " " + idx;            
             }else{
-                root = "INSERT OR REPLACE INTO DIRECTORIES (ID,NAME) VALUES(\'" + rootHash + "\',\'" + idx +"\');";
+                root = "INSERT OR IGNORE INTO DIRECTORIES (ID,NAME) VALUES(\'" + rootHash + "\',\'" + idx +"\');";
                 char *sqlInsert = const_cast<char*>(root.c_str());
                 remoteConnection = sqlite3_exec(db, sqlInsert, callback, 0, &zErrMsg);
                 op = "inserted into DIRECTORIES values : " + rootHash + " " + idx;
@@ -173,12 +165,12 @@ static int get_info(const char *fpath, const struct stat *sb,
             wasSQLOperationSuccessful(remoteConnection, root);
         }else{
             if(type=="f"){
-                root = "INSERT OR REPLACE INTO FILES (ID,NAME) VALUES(\'" + _id + "\',\'" + idx +"\');";
+                root = "INSERT OR IGNORE INTO FILES (ID,NAME) VALUES(\'" + _id + "\',\'" + idx +"\');";
                 char *sqlInsert = const_cast<char*>(root.c_str());
                 remoteConnection = sqlite3_exec(db, sqlInsert, callback, 0, &zErrMsg);
                 op = "inserted into FILES values : " + _id + " " + idx;            
             }else{
-                root = "INSERT OR REPLACE INTO DIRECTORIES (ID,NAME) VALUES(\'" + _id + "\',\'" + idx +"\');";
+                root = "INSERT OR IGNORE INTO DIRECTORIES (ID,NAME) VALUES(\'" + _id + "\',\'" + idx +"\');";
                 char *sqlInsert = const_cast<char*>(root.c_str());
                 remoteConnection = sqlite3_exec(db, sqlInsert, callback, 0, &zErrMsg);
                 op = "inserted into DIRECTORIES values : " + _id + " " + idx;
@@ -197,27 +189,23 @@ static int get_info(const char *fpath, const struct stat *sb,
 void init_db(char* dbName){
     std::cout << "Initalizing databse...\n";
     
-
     if(remoteConnection){
         fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
         return;
     } else {
         fprintf(stdout, "Opened database successfully\n");
     }
-
-    sql = "DROP table IF EXISTS USERS";
+    sql = "DROP TABLE IF EXISTS USERS";
     remoteConnection = sqlite3_exec(db, sql, callback, 0, &zErrMsg);
-    wasSQLOperationSuccessful(remoteConnection, "Users table drop");
-
-    sql = "DROP table IF EXISTS DIRECTORIES";
+    wasSQLOperationSuccessful(remoteConnection, "Users table creation");
+    sql = "DROP TABLE IF EXISTS DIRECTORIES";
     remoteConnection = sqlite3_exec(db, sql, callback, 0, &zErrMsg);
-    wasSQLOperationSuccessful(remoteConnection, "Directories table drop");
-
-    sql = "DROP table IF EXISTS FILES";
+    wasSQLOperationSuccessful(remoteConnection, "Users table creation");
+    sql = "DROP TABLE IF EXISTS FILES";
     remoteConnection = sqlite3_exec(db, sql, callback, 0, &zErrMsg);
-    wasSQLOperationSuccessful(remoteConnection, "Files table drop");
+    wasSQLOperationSuccessful(remoteConnection, "Users table creation");
 
-    sql = "CREATE TABLE USERS("\
+    sql = "CREATE TABLE IF NOT EXISTS USERS("\
                 "ID TEXT PRIMARY KEY NOT NULL," \
                 "NAME       TEXT    NOT NULL," \
                 "DISKUSAGE  INT);";
@@ -225,18 +213,18 @@ void init_db(char* dbName){
     remoteConnection = sqlite3_exec(db, sql, callback, 0, &zErrMsg);
     wasSQLOperationSuccessful(remoteConnection, "Users table creation");
 
-    sql = "CREATE TABLE DIRECTORIES("\
+    sql = "CREATE TABLE IF NOT EXISTS DIRECTORIES("\
         "ID     TEXT     NOT NULL,"\
-        "NAME   TEXT    NOT NULL,"\
+        "NAME   TEXT    NOT NULL UNIQUE,"\
         "SIZE   INT,"\
         "FOREIGN KEY(ID) REFERENCES USERS(ID));";
 
     remoteConnection = sqlite3_exec(db, sql, callback, 0, &zErrMsg);
     wasSQLOperationSuccessful(remoteConnection, "Directory table creation");
 
-    sql = "CREATE TABLE FILES("\
+    sql = "CREATE TABLE IF NOT EXISTS FILES("\
         "ID     TEXT     NOT NULL,"\
-        "NAME   TEXT    NOT NULL,"\
+        "NAME   TEXT    NOT NULL UNIQUE,"\
         "SIZE   INT,"\
         "LASTACCESS TEXT,"\
         "FOREIGN KEY(ID) REFERENCES USERS(ID));";
@@ -287,8 +275,6 @@ void index_users(char* dbName, char* disk){
     std::string root = "INSERT OR REPLACE INTO USERS (ID,NAME) VALUES(\'" + hash + "\',\'" + r +"\');"; 
     char *sqlInsert = const_cast<char*>(root.c_str());
     remoteConnection = sqlite3_exec(db, sqlInsert, callback, 0, &zErrMsg);
-    std::string op = "inserted into users values : " + hash + " " + r;
-    std::cout << op << std::endl;
     wasSQLOperationSuccessful(remoteConnection, root);
 
 
@@ -306,7 +292,6 @@ void index_users(char* dbName, char* disk){
         char *sqlInsert = const_cast<char*>(insert.c_str());
         remoteConnection = sqlite3_exec(db, sqlInsert, callback, 0, &zErrMsg);
         std::string op = "inserted into users values : " + hash + " " + tmp;
-        std::cout << op << std::endl;
         wasSQLOperationSuccessful(remoteConnection, insert);
     }
 }
@@ -330,7 +315,6 @@ void run_multi_threaded(){
     user_thread.join();
 
     std::string disk_path = get_path_string(diskName);
-    std::cout << disk_path << std::endl;
 
     // chdir(const_cast<char*>(disk_path.c_str()));
     std::vector<std::string> dirs;
@@ -359,10 +343,8 @@ void run_multi_threaded(){
                     tmp_id = sqlite3_column_text(stmt, 0);
                     _id = std::string(reinterpret_cast<const char*>(tmp_id));
                 }
-                std::cout << _id << std::endl;
                 sqlite3_reset(stmt);
                 std::string tmp2 = tmp + "/" + user;
-                std::cout << tmp2 << std::endl;
                 auto temp2 = tmp2.c_str();
                 int i = nftw(temp2, get_info, 20, flags);
             }
