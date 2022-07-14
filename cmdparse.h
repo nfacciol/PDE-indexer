@@ -1,3 +1,9 @@
+/******************************************************************************
+* Author: Nicholas Facciola
+* 
+* cmdparse h defines the methods and data that will be implemented by
+* cmdparse cpp
+*******************************************************************************/
 #include <iostream>
 #include <stdio.h>
 #include <string>

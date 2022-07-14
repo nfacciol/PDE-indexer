@@ -1,3 +1,10 @@
+/******************************************************************************
+* Author: Nicholas Facciola
+* 
+* cmdparse cpp implements the methods aformentioned in cmdparse.h
+* this praser class is then then used in the indexer in order to 
+* read the command line arguments
+*******************************************************************************/
 #include "cmdparse.h"
 
 void Parser::printTokens(){

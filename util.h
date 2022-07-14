@@ -1,3 +1,6 @@
+/***************************************
+*utility header file for helper functions
+****************************************/
 #include <iostream>
 #include <sqlite3.h>
 #include <string.h>

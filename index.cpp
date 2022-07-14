@@ -1,3 +1,34 @@
+/******************************************************************************
+ * Author: Nicholas Facciola
+ * Index cpp is the main backend file for adding files and directories
+ * across PDE disks on to the databsase files.
+ * 
+ * Basic algorithm:
+ *  - get the date of creation and determine if an even or odd amount of days
+ *      has passed since creation
+ *  - if even index even db files else odd (this is to prevent corruption on
+ *      massively large disks)
+ *  - start by dropping old tables and re creating them
+ *  - gather all the users and assign an md5 hash to the their name as their id
+ *      (this is to keep consistency across disks with the same user)
+ *  - call ntfw on each user (no user is assigned to root)
+ *  - if ftw->type == d its a directory and if f its a file
+ *  - insert the file or dir into the table and attach it to the correct user
+ *      then repeat until tree has no more subtrees
+ * 
+ * POSSIBLE IMPROVEMENTS
+ *  - redo the schema to optimize search times
+ *  - add in stat features
+ * 
+ * KNOWN BUGS
+ *  - one disk has a 'users' directory instead of user and this may cause issues
+ *  - very large disks may sometimes not finish. This is covered however in the
+ *      driver shell script with a unix timeout and remainind directories are left
+ *      unindexed
+ *  - any path with single quotes in it causes an sql syntax error
+ * 
+ * Version 1.0 - basic functions implemented
+ ******************************************************************************/
 #define _XOPEN_SOURCE 500
 #include <ftw.h>
 #include <iostream>
@@ -15,10 +46,11 @@
 #include <thread>
 #include <stdint.h>
 #include "util.h"
+#include "date.h"
 
+//global variables
 sqlite3 *db;
 char* sql;
-char *zErrMsg = 0;
 int remoteConnection;
 char* diskName;
 char* databaseName;
@@ -26,8 +58,20 @@ std::string _id;
 std::string userName;
 std::vector<std::string> userHashes;
 std::string rootHash;
+int differenceInDays = 0;
 
-std::vector<std::string> split_string_by_newline(std::string path, std::string &str, std::string delim){
+/****************************************************************************************************
+ * helper functions
+*****************************************************************************************************/
+///<summary>
+///[DEPRECATED]
+///takes a string and returns a vector of strings where the original string is split by delimeter character
+///@params
+///std::string path -> dir path to append to the front of the string
+///std::string &str -> reference to original string
+///std::string delim -> character to split string by
+///</summary>
+std::vector<std::string> split_string(std::string path, std::string &str, std::string delim){
     std::vector<std::string> result;
     int start = 0;
     int end = str.find(delim);
@@ -41,7 +85,12 @@ std::vector<std::string> split_string_by_newline(std::string path, std::string &
     return result;
 }
 
-
+///<summary>
+///uses dirent.h to list all directories in a folder and stores in a vector
+///@params
+///const char *path -> pointer to characters named path
+///std::vector<std::string> &dirs -> reference to a vector of strings
+///</summary>
 void list_dir(const char *path, std::vector<std::string> &dirs) {
     struct dirent *entry;
     DIR *dir = opendir(path);
@@ -50,7 +99,7 @@ void list_dir(const char *path, std::vector<std::string> &dirs) {
     }
 
     while ((entry = readdir(dir)) != NULL) {
-        if(strcmp (entry->d_name,".") != 0 && strcmp (entry->d_name,"..") != 0 && strcmp(entry->d_name,".snapshot") != 0){
+        if(strcmp (entry->d_name,".") != 0 && strcmp (entry->d_name,"..") != 0 && strcmp(entry->d_name,".snapshot") != 0){ //ignire these directories
             std::string tmp(entry->d_name);
             dirs.push_back((tmp));
         }
@@ -59,22 +108,50 @@ void list_dir(const char *path, std::vector<std::string> &dirs) {
     closedir(dir);
 }
 
+///<summary>
+///based on disk name return a string with its full path
+///@params
+///char* disk -> pointer to characters name disk
+///</summary>
 std::string get_path_string(char* disk){
     std::string path = "/nfs/site/disks/";
     std::string disc(disk);
+    if(differenceInDays % 2 != 0){
+        int k = disc.find("odd");
+        disc = disc.substr(0,k);
+    }
     path += disc + "/";
     return path;
 }
 
+///<summary>
+///return a size_t if string is /user
+///@params
+///std::string s -> string to parse
+///</summary>
 inline size_t isUser(std::string s){
     std::string isuser = "/user";
     return s.find(isuser);
 }
 
+///<summary>
+///return true if dir is part of snapshot
+///@params
+///std::string s -> string to parse
+///</summary>
 bool isSnapshot(std::string s){
     return s.find("/.snapshot/") != std::string::npos || s.find("/archivelog/") != std::string::npos;
 }
 
+///<summary>
+///ntfw method to read file tree and determine whether to insert
+///in the file or directories table
+///@params
+///const char *fpath -> pointer to characters that is the file path
+///const struct stat *sb -> pointer to a struct of stat
+///int tflag -> int representing tree flag
+///struct FTW *ftwbuf -> pointer to an FTW struct
+///</summary>
 static int get_info(const char *fpath, const struct stat *sb,
              int tflag, struct FTW *ftwbuf)
 {
@@ -121,13 +198,15 @@ static int get_info(const char *fpath, const struct stat *sb,
         }
         return 0; /* To tell nftw() to continue */
     }else{
-        return 2;
+        return 2; //skip subtree
     }       
 }
 
-/*************************************
- * initalize the database and users
-**************************************/
+///<summary>
+///initalize the database
+///@params
+///char* dbName -> pointer to characters representing database name
+///</summary>
 void init_db(char* dbName){
     std::cout << "Initalizing databse...\n";
     
@@ -175,7 +254,12 @@ void init_db(char* dbName){
     wasSQLOperationSuccessful(remoteConnection, "File table creation");
 }
 
-
+///<summary>
+///create the users table
+///@params
+///char* dbName -> pointer to characters representing database name
+///char* disk -> pointer to characters named disk
+///</summary>
 void index_users(char* dbName, char* disk){
     std::cout << "Indexing users...\n";
     //get path to disk
@@ -201,7 +285,7 @@ void index_users(char* dbName, char* disk){
     std::vector<std::string> user_dirs;
     list_dir(constBuf, user_dirs);
 
-
+    //insert root
     std::string r = "root_";
     r.append(disk);
     std::string a = "printf \'%s\' \"" + r + "\"| md5sum";
@@ -219,7 +303,7 @@ void index_users(char* dbName, char* disk){
     remoteConnection = sqlite3_exec(db, sqlInsert, callback, 0, &zErrMsg);
     wasSQLOperationSuccessful(remoteConnection, root);
 
-
+    //insert users
     for(auto dir : user_dirs){
         std::string tmp(dir);
         a = "printf \'%s\' \"" + tmp + "\"| md5sum";
@@ -239,7 +323,9 @@ void index_users(char* dbName, char* disk){
 }
 
 
-
+///<summary>
+///called by main method and is the driver for the algorithm
+///</summary>
 void run_multi_threaded(){
     std::string tmp(diskName);
     tmp += ".db";
@@ -299,9 +385,34 @@ void run_multi_threaded(){
     return;
 }
 
+///<summary>
+///main method
+///</summary>
 int main(int argc, char** argv){
     struct timespec begin, end; 
     clock_gettime(CLOCK_REALTIME, &begin);
+
+    //IMPORTANT DONT CHANGE FRON CRON JOB
+    Date dateOfCreation;
+    dateOfCreation.d = 13;
+    dateOfCreation.m = 7;
+    dateOfCreation.y = 2022;
+
+    std::string a = exec("date \'+%d\'");
+    a = trim(a);
+    int day = stoi(a);
+    a = exec("date \'+%m\'");
+    a = trim(a);
+    int month = stoi(a);
+    a = exec("date \'+%Y\'");
+    a = trim(a);
+    int year = stoi(a);
+    Date today;
+    today.d = day;
+    today.m = month;
+    today.y = year;
+    differenceInDays = abs(getDifference(today,dateOfCreation));
+
 
     if(argc >= 2){
         diskName = argv[1];
