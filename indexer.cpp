@@ -145,24 +145,30 @@ void print_file_result(sqlite3_stmt *&stmt, std::string &filename, int i,
                 std::cout << "\n";
             }
         }
-        const unsigned char* tmp_name = sqlite3_column_text(stmt,0);
-        std::string tmp = (reinterpret_cast<const char*>(tmp_name));
-        size_t found = tmp.find_last_of('/');
-        std::string file = tmp.substr(found+1, tmp.size());
-        if(!match){
-            if(file.find(filename) != std::string::npos){
-                std::cout << tmp_name << std::endl;
-                count++;
+        try{
+            const unsigned char* tmp_name = sqlite3_column_text(stmt,0);
+            std::string tmp = (reinterpret_cast<const char*>(tmp_name));
+            size_t found = tmp.find_last_of('/');
+            std::string file = tmp.substr(found+1, tmp.size());
+            if(!match){
+                if(file.find(filename) != std::string::npos){
+                    std::cout << tmp_name << std::endl;
+                    count++;
+                }else{
+                    continue;
+                }
             }else{
-                continue;
+                if(file == filename){
+                    std::cout << tmp_name << std::endl;
+                    count++;
+                }else{
+                    continue;
+                }
             }
-        }else{
-            if(file == filename){
-                std::cout << tmp_name << std::endl;
-                count++;
-            }else{
-                continue;
-            }
+        }
+        catch(...){
+            std::cout << "Error the databse is locked. Try running again in a min or run \'./index [DISK]\n";
+            return;
         }
     }
     sqlite3_reset(stmt);
@@ -254,11 +260,16 @@ void print_regex_result(sqlite3_stmt *&stmt, std::string &regex, int i,
                 std::cout << "\n";
             }
         }
-        const unsigned char* tmp_name = sqlite3_column_text(stmt,0);
-        std::string tmp_str = std::string(reinterpret_cast<const char*>(tmp_name));
-        char *cstr = &tmp_str[0];
-        int j = useRegex(cstr, pattern);
-        count = j == 0 ? count += 1 : count = count;
+        try{
+            const unsigned char* tmp_name = sqlite3_column_text(stmt,0);
+            std::string tmp_str = std::string(reinterpret_cast<const char*>(tmp_name));
+            char *cstr = &tmp_str[0];
+            int j = useRegex(cstr, pattern);
+            count = j == 0 ? count += 1 : count = count;
+        }catch(...){
+            std::cout << "Error the databse is locked. Try running again in a min or run \'./index [DISK]\n";
+            return;
+        }
     }
     sqlite3_reset(stmt);
     sqlite3_close(db);
@@ -314,20 +325,25 @@ void print_dir_result(sqlite3_stmt *&stmt, std::string &dirname, int i,
                 std::cout << "\n";
             }
         }
-        const unsigned char* tmp_name = sqlite3_column_text(stmt,0);
-        std::string tmp = (reinterpret_cast<const char*>(tmp_name));
-        size_t found = tmp.find_last_of('/');
-        std::string file = tmp.substr(found+1, tmp.size());
-        if(!match){
-            if(file.find(dirname) != std::string::npos){
-                std::cout << tmp_name << std::endl;
-                count++;
+        try{
+            const unsigned char* tmp_name = sqlite3_column_text(stmt,0);
+            std::string tmp = (reinterpret_cast<const char*>(tmp_name));
+            size_t found = tmp.find_last_of('/');
+            std::string file = tmp.substr(found+1, tmp.size());
+            if(!match){
+                if(file.find(dirname) != std::string::npos){
+                    std::cout << tmp_name << std::endl;
+                    count++;
+                }
+            }else{
+                if(file == dirname){
+                    std::cout << tmp_name << std::endl;
+                    count++;
+                }
             }
-        }else{
-            if(file == dirname){
-                std::cout << tmp_name << std::endl;
-                count++;
-            }
+        }catch(...){
+            std::cout << "Error the databse is locked. Try running again in a min or run \'./index [DISK]\n";
+            return;
         }
     }
     sqlite3_reset(stmt);
@@ -458,7 +474,7 @@ int setFlags(int argc, char** argv, flags &f, Parser *&p){
             f.force = true;
     }
     if(p->findFlag("-x")){
-        for(int i = 2; i < argc; i++){
+        for(int i = 1; i < argc; i++){
             if(std::string(argv[i]) == "-x"){
                 try{
                     std::string str(argv[i+1]);
@@ -474,7 +490,7 @@ int setFlags(int argc, char** argv, flags &f, Parser *&p){
         f.match = true;
     }
     if(p->findFlag("-d")){
-        for(int i = 2; i < argc; i++){
+        for(int i = 1; i < argc; i++){
             if(std::string(argv[i]) == "-d"){
                 try{
                     std::string str(argv[i+1]);
@@ -494,13 +510,13 @@ int setFlags(int argc, char** argv, flags &f, Parser *&p){
         }
     }
     if(p->findFlag("-u")){
-        for(int i = 2; i < argc; i++){
+        for(int i = 1; i < argc; i++){
             if(std::string(argv[i]) == "-u"){
                 try{
                     std::string str(argv[i+1]);
                     f.user = str;
                 }catch(...){
-                    std::cout << "Error... please specify disk number after disk flag\n";
+                    std::cout << "Error... please specify username after disk flag\n";
                     return 3;
                 }
             }
